@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>map measure</title>
+    <style type="text/css">
+    .position {
+        font-family: "Consolas";
+        color: #666;
+    }
+
+    .point {
+        border: 1px solid #000;
+        width: 13px;
+        height: 13px;
+        text-align: center;
+        background-color: #00a;
+        font-size: 12px;
+        color: #fff;
+        border-radius: 50%;
+        box-shadow: 1px 1px 0px rgba(0, 0, 0, 0.5);
+        pointer-events: none;
+    }
+
+    #panel {
+        display: none;
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        border: 1px solid #000;
+        background-color: #fff;
+        padding: 4px 6px;
+        box-shadow: 1px 1px 0px #000;
+        width: 300px;
+        z-index: 1;
+    }
+
+    #panel input {
+        width: 50px;
+        margin-right: 10px;
+    }
+
+    #points-list {
+        position: relative;
+        margin-bottom: 5px;
+        font-size: 12px;
+        max-height: 400px;
+        overflow-y: auto;
+    }
+
+    .point-row {
+        margin: 1px 0px;
+        padding: 2px;
+    }
+
+    .point-row .point {
+        display: inline-block;
+        margin-right: 6px;
+    }
+
+    .distance-row {
+        position: absolute;
+        left: 20px;
+    }
+
+    .distance-line {
+        display: inline-block;
+        border-top: 1px solid #333;
+        width: 85px;
+        vertical-align: middle;
+    }
+
+    .distance-row .distance-value {
+        display: inline-block;
+        position: relative;
+        top: 1px;
+        left: 2px;
+    }
+
+    #map-wrapper {
+        position: relative;
+    }
+
+    #canvas {
+        display: none;
+        border: 1px solid #000;
+    }
+
+    #map-wrapper .point {
+        position: absolute;
+    }
+    </style>
+</head>
+<body>
+    <div id="panel">
+        <div id="cursor" class="position">0, 0</div>
+        Miles/pixel: <input type="number" id="scale" value="1" step="0.25">
+        Miles/day:  <input type="number" id="speed" value="20">
+        <br>
+        Points:
+        <div id="points-list"></div>
+        Total distance: <span id="distance" class="distance-value"></span>
+    </div>
+
+    <input type="file" id="upload" onchange="document.getElementById('load').disabled = false;">
+    <input type="button" id="load" value="Load" onclick="loadMap();" disabled>
+    <br>
+    <div id="map-wrapper">
+        <canvas id="canvas"></canvas>
+        <div id="points"></div>
+    </div>
+
+    <script type="text/javascript">
+    const points_list = document.getElementById("points-list");
+    const wrapper = document.getElementById("map-wrapper");
+    const canvas = document.getElementById("canvas");
+    const controls = {
+        scale: document.getElementById("scale"),
+        speed: document.getElementById("speed")
+    };
+
+    const ctx = canvas.getContext("2d");
+    const reader = new FileReader();
+    const map = new Image();
+    let total;
+    let points;
+
+    reader.addEventListener("load", () => {
+        map.src = reader.result;
+        localStorage.setItem("map", map.src);
+    });
+    
+    // just for the coordinate display in the points panel
+    window.addEventListener("mousemove", event => {
+        const cursor = getRelativePosition(event);
+        document.getElementById("cursor").innerText = `${cursor[0]}, ${cursor[1]}`;
+    });
+
+    // load the stored scale and speed and attach the updateNumbers handler to both
+    for(const field in controls) {
+        const stored = localStorage.getItem(field);
+        
+        if(stored) { controls[field].value = stored; }
+        controls[field].addEventListener("input", updateNumbers);
+    }
+
+    canvas.addEventListener("click", addPoint);
+    map.addEventListener("load", showMap);
+
+    function getRelativePosition(event) {
+        // subtract the canvas offset from the mouse coordinates to get
+        // the cursor's position relative to the map
+        return [event.pageX - wrapper.offsetLeft, event.pageY - wrapper.offsetTop];
+    }
+    
+    function loadMap() {
+        // load selected file into the FileReader
+        reader.readAsDataURL(document.getElementById("upload").files[0]);
+    }
+
+    function showMap() {
+        // show canvas and points panel
+        canvas.style.display = "block";
+        document.getElementById("panel").style.display = "block";
+
+        // load map image
+        canvas.width = map.width;
+        canvas.height = map.height;
+        ctx.drawImage(map, 0, 0);
+
+        // reset everything
+        total = 0;
+        points = [];
+        document.getElementById("distance").innerText = "";
+
+        while(points_list.firstChild) {
+            points_list.removeChild(points_list.firstChild);
+        }
+    }
+
+    function updateNumbers() {
+        for(const field in controls) {
+            const value = controls[field].value;
+
+            localStorage.setItem(field, value);
+        }
+
+        // update all distance value texts
+        for(const element of document.getElementsByClassName("distance-value")) {
+            if(element.innerText) {
+                element.innerText = parseDistance(element.dataset.distance);
+            }
+        }
+    }
+
+    function parseDistance(distance) {
+        const miles = distance * scale.value;
+        return `${miles} miles (${parseFloat((miles / speed.value).toFixed(2))} days)`;
+    }
+
+    function addDistance(distance) {
+        points_list.innerHTML += `<div class="distance-row" style="top: ${(points.length - 2) * 21 + 11}px;"><div class="distance-line"></div><div class="distance-value" data-distance="${distance}">${parseDistance(distance)}</div></div>`
+
+        total += distance;
+        document.getElementById("distance").innerHTML = parseDistance(total);
+        document.getElementById("distance").dataset.distance = total;
+    }
+
+    function addPoint(event) {
+        const [x, y] = getRelativePosition(event);
+        const point = `<div class="point" style="left: ${x - 6}px; top: ${y - 6}px;">${points.push([x, y])}</div>`;
+
+        // add point on map and in list
+        document.getElementById("points").innerHTML += point;
+        points_list.innerHTML += `<div class="point-row">${point}<span class="position">${x}, ${y}</span></div>`;
+
+        // add a new distance measure if there are at least 2 points
+        if(points.length > 1) {
+            const [a, b] = [points[points.length - 2], [x, y]]; // grab previous and current points
+            const distance = Math.round(Math.hypot(a[0] - b[0], a[1] - b[1]));
+
+            addDistance(distance);
+
+            // draw line
+            ctx.strokeStyle = "#003";
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(...a);
+            ctx.lineTo(...b);
+            ctx.stroke();
+        }
+    }
+
+    // load the stored map if it exists
+    if(localStorage.getItem("map")) {
+        map.src = localStorage.getItem("map");
+    }
+    </script>
+</body>
+</html>
